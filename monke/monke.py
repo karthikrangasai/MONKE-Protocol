@@ -112,7 +112,7 @@ class MONKE:
         while True:
             if self.backlog_queue.qsize > self.backlog_queue_size:
                 continue
-            syn_packet = self.sock.recv(32*4)
+            syn_packet = self.sock.recv(32*4 + 1)
             try:
                 syn_packet = struct.unpack('!4Is', syn_packet)
                 assert len(
@@ -135,12 +135,12 @@ class MONKE:
                                         self.ack_num,
                                         self.index_num,
                                         self.seq_num,
-                                        '')
+                                        b'')
             syn_ack_packet = syn_ack_packet_obj.bundle_packet()
             self.sock.send(syn_ack_packet)
 
             # Receive an ACK
-            ack_packet = self.sock.recv(32*4)
+            ack_packet = self.sock.recv(32*4 + 1)
             ack_packet = struct.unpack('!4Is', ack_packet)
             assert len(
                 ack_packet) == 4, '[ERROR] Handshake failed - packet format not as expected!'
@@ -195,13 +195,13 @@ class MONKE:
                                 self.ack_num,
                                 self.index_num,
                                 self.seq_num,
-                                '')
+                                b'')
         syn_packet = syn_packet_obj.bundle_packet()
         self.sock.send(syn_packet)
         self.CONNECTION_STATE = CONNECTION_STATES.HANDSHAKE
 
         # Receiving SYN_ACK, or in our terms, HELLO-ACCEP
-        syn_ack_packet = self.sock.recv(32*4)
+        syn_ack_packet = self.sock.recv(32*4 + 1)
         syn_ack_packet = struct.unpack('!4Is', syn_ack_packet)
         assert len(
             syn_packet) == 4, '[ERROR] Handshake failed - packet format not as expected!'
@@ -218,7 +218,7 @@ class MONKE:
                                 self.ack_num,
                                 self.index_num,
                                 self.seq_num,
-                                '')
+                                b'')
         ack_packet = ack_packet_obj.bundle_packet()
         self.sock.send(ack_packet)
         self.CONNECTION_STATE = CONNECTION_STATES.CONNECTED
@@ -229,7 +229,31 @@ class MONKE:
         else:
             raise NoSocketCreated('[ERROR] Socket binding failed.')
 
-    def send(self):
+    def _break_into_packets(self, data):
+        # TODO: Turn this into a generator function? This will give better
+        #       performance for large data.
+        if not isinstance(data, bytes):
+            data = bytes(data, 'utf-8')
+        broken_data = []
+        start_idx = 0
+        while start_idx < len(data):
+            broken_data.append(data[start_idx:start_idx+520])
+            start_idx += 520
+
+        return broken_data
+
+    def send(self, data):
+        # Send 520 bytes of data every packet
+        data_packets = self._break_into_packets(data)
+        for index, data_packet in enumerate(data_packets):
+            packet_obj = Packet(MESSAGE_TYPES.DATA,
+                                self.SR_window_size,
+                                self.ack_num,
+                                index,
+                                self.seq_num,
+                                data_packet)
+            packet = packet_obj.bundle_packet()
+            self.un_ackd_buffer[(index, self.seq_num)] = packet
         pass
 
     def recv(self):
