@@ -106,6 +106,7 @@ class MONKE:
         self.ack_num = 0
         self.index_num = 0
         self.mutex = Lock()
+        self.TIMEOUT = 5
 
     def _listen(self):
         # Receive SYN, or in our case HELLO
@@ -204,7 +205,7 @@ class MONKE:
         syn_ack_packet = self.sock.recv(32*4 + 1)
         syn_ack_packet = struct.unpack('!4Is', syn_ack_packet)
         assert len(
-            syn_packet) == 4, '[ERROR] Handshake failed - packet format not as expected!'
+            syn_packet) == 5, '[ERROR] Handshake failed - packet format not as expected!'
 
         message_type = syn_ack_packet[0] >> 27
         if message_type != (MESSAGE_TYPES.HELLO | MESSAGE_TYPES.ACCEP):
@@ -230,22 +231,23 @@ class MONKE:
             raise NoSocketCreated('[ERROR] Socket binding failed.')
 
     def _break_into_packets(self, data):
-        # TODO: Turn this into a generator function? This will give better
-        #       performance for large data.
+        # This function returns a generator that yields a 520-byte
+        # chunk of data in order
         if not isinstance(data, bytes):
             data = bytes(data, 'utf-8')
-        broken_data = []
+        broken_data = None
         start_idx = 0
         while start_idx < len(data):
-            broken_data.append(data[start_idx:start_idx+520])
+            broken_data = data[start_idx:start_idx+520]
             start_idx += 520
-
-        return broken_data
+            yield broken_data
 
     def send(self, data):
         # Send 520 bytes of data every packet
         data_packets = self._break_into_packets(data)
+        window = 0
         for index, data_packet in enumerate(data_packets):
+            window += 1
             packet_obj = Packet(MESSAGE_TYPES.DATA,
                                 self.SR_window_size,
                                 self.ack_num,
@@ -253,8 +255,41 @@ class MONKE:
                                 self.seq_num,
                                 data_packet)
             packet = packet_obj.bundle_packet()
-            self.un_ackd_buffer[(index, self.seq_num)] = packet
+            self.un_ackd_buffer[(index, self.seq_num)] = [packet, None]
+            # The None is meant to hold the time of packet transmission
+            self.seq_num += len(packet)
+            if window == 10:
+                # 10 packets in windows
+                send_helper = Thread(target=self._send_helper)
+                recv_ack_thread = Thread(target=self._recv_acks)
+                recv_ack_thread.start()
+                send_helper.start()
+                send_helper.join()
+                recv_ack_thread.join()
+                window = 0
+        if window > 0:
+            send_helper = Thread(target=self._send_helper)
+            recv_ack_thread = Thread(target=self._recv_acks)
+            recv_ack_thread.start()
+            send_helper.start()
+            send_helper.join()
+            recv_ack_thread.join()
+            window = 0
+
+    def _send_helper(self):
         pass
+
+    def _recv_acks(self):
+        while self.un_ackd_buffer:
+            ack_packet = self.sock.recv(32*4 + 1)
+            ack_packet = struct.unpack('!4Is', ack_packet)
+            assert len(
+                ack_packet) == 5, '[ERROR] Packet error - packet format not as expected!'
+            message_type = ack_packet[0] >> 27
+            index = ack_packet[2]
+            seq_num = ack_packet[3]
+            if (index, seq_num) in self.un_ackd_buffer:
+                del self.un_ackd_buffer[(index, seq_num)]
 
     def recv(self):
         pass
