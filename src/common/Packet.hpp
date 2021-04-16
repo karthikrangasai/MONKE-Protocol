@@ -9,19 +9,10 @@
 #include <mutex>
 #include <time.h>
 #include <cstring>
-using namespace std;
+#include <cassert>
 
-#define usl uint32_t
-// Note: The above was originally meant to define unsigned long, however
-//       we want strictly 32 bits to be allocated.
-/* 
-	"Then shalt thou count to 32, no more, no less. 32 shall be the
-	number thou shalt count, and the number of the counting shall be 32.
-	33 shalt thou not count, neither count thou 31, excepting that thou 
-	then proceed to 32. 34 is right out. Once the number 32, being the 
-	32nd number, be reached, then loadest thou thy values, which being 
-	32 bits, shall serve you well "
-*/
+#include "types.hpp"
+using namespace std;
 
 /**
  * @class Packet
@@ -52,7 +43,7 @@ class Packet {
     uint32_t acknowledgementNum;
     uint32_t indexNum;
     uint32_t sequenceNum;
-    char *applnLayerData = nullptr;
+    char applnLayerData[512];  // = nullptr;  // 560
 
    public:
     /**
@@ -65,9 +56,60 @@ class Packet {
     * @param sequenceNum 
     * @param applnLayerData 
     */
-    Packet(uint32_t msg_type, uint32_t recv_window, uint32_t acknowledgementNum, uint32_t indexNum, uint32_t sequenceNum, char applnLayerData[]);
+    Packet(uint32_t msg_type, uint32_t recv_window, uint32_t acknowledgementNum, uint32_t indexNum, uint32_t sequenceNum, char applnLayerData[]) {
+        if (msg_type != MESSAGE_TYPES::DATA) {
+            this->msgType_RecvWindow = msg_type >> RECEIVE_WINDOW_BITS;
+            if (recv_window > (1 << RECEIVE_WINDOW_BITS) - 1)
+                recv_window = 0 ^ ((1 << RECEIVE_WINDOW_BITS) - 1);
+            this->msgType_RecvWindow = this->msgType_RecvWindow ^ recv_window;
+            this->acknowledgementNum = acknowledgementNum;
+            this->indexNum = indexNum;
+            this->sequenceNum = sequenceNum;
+            memset(this->applnLayerData, 0, sizeof(this->applnLayerData));
+        } else {
+            assert(sizeof(applnLayerData) <= MAXIMUM_PAYLOAD);
+            this->msgType_RecvWindow = msg_type >> RECEIVE_WINDOW_BITS;
+            if (recv_window > (1 << RECEIVE_WINDOW_BITS) - 1)
+                recv_window = 0 ^ ((1 << RECEIVE_WINDOW_BITS) - 1);
+            this->msgType_RecvWindow = this->msgType_RecvWindow ^ recv_window;
+            this->acknowledgementNum = acknowledgementNum;
+            this->indexNum = indexNum;
+            this->sequenceNum = sequenceNum;
+            memset(this->applnLayerData, 0, sizeof(this->applnLayerData));
+            // this->applnLayerData = (char *)malloc(sizeof(applnLayerData));
+            memcpy(this->applnLayerData, applnLayerData, sizeof(applnLayerData));
+        }
+    }
 
-    ~Packet();
+    ~Packet() {}
 
-    uint32_t getSequenceNum();
+    uint32_t getSequenceNum() {
+        return this->sequenceNum;
+    }
+
+    uint32_t getIndexNum() {
+        return this->indexNum;
+    }
+
+    uint32_t getMessageType() {
+        return (this->msgType_RecvWindow >> RECEIVE_WINDOW_BITS);
+    }
+
+    static Packet parsePacket(char* data) {
+        uint32_t values[4];
+        char _applnLayerData[512];  // = nullptr;  // 560
+
+        char* data_copy = data;
+
+        char num[4];
+        for (int i = 0; i < 4; ++i) {
+            memcpy(num, data_copy, 4 * sizeof(char));
+            values[i] = (uint32_t)atoi(num);
+            data_copy = data_copy + 4 * sizeof(char);
+        }
+        memcpy(_applnLayerData, data_copy, sizeof(data_copy));
+        uint32_t msgType = values[0] >> RECEIVE_WINDOW_BITS;
+        uint32_t recvWindow = values[0] & ((1 << RECEIVE_WINDOW_BITS) - 1);
+        return Packet(msgType, recvWindow, values[1], values[2], values[3], _applnLayerData);
+    }
 };

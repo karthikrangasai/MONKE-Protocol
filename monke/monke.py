@@ -75,6 +75,16 @@ class Packet:
         return packet
 
 
+'''
+Keep sending until ACK:
+    Each Packet can have a timer variable that gets switched on when sent.
+    threading.Timer() runs a peice of code for every 'n' seconds.
+    Stop the thread upon an ACK for that packet.
+
+
+'''
+
+
 class MONKE:
     """
     Discussions:
@@ -98,10 +108,16 @@ class MONKE:
         self.CONNECTION_STATE = CONNECTION_STATES.NO_CONNECTION
         self.SERVER_STATE = None
 
+        # Client Variables
         self.SR_window_size = 1024
         self.SR_window = {}  # Map: (index, seq) -> data
         self.un_ackd_buffer = {}  # Map: (index, seq) -> data
 
+        # Server Variables
+        self.data_buffer = {}
+        # Keeping as a dictionary so that we can sort after we get all data before sending to appln
+
+        # Common Variables
         self.seq_num = 0
         self.ack_num = 0
         self.index_num = 0
@@ -242,6 +258,9 @@ class MONKE:
             start_idx += 520
             yield broken_data
 
+    def _send_packet(self, packet):
+        self.sock.send(packet)
+
     def send(self, data):
         # Send 520 bytes of data every packet
         data_packets = self._break_into_packets(data)
@@ -290,6 +309,53 @@ class MONKE:
             seq_num = ack_packet[3]
             if (index, seq_num) in self.un_ackd_buffer:
                 del self.un_ackd_buffer[(index, seq_num)]
+
+# begin
+#   frame s; // s denotes frame to be sent
+#    frame t; // t is temporary frame
+#    S_window = power(2, m-1); // Assign maximum window size
+#    SeqFirst = 0; // Sequence number of first frame in window
+#    SeqN = 0; // Sequence number of Nth frame window
+#    while (true) // check repeatedly
+#     do
+#         Wait_For_Event(); // wait for availability of packet
+#          if (Event(Request_For_Transfer)) then
+#           //check if window is full
+#            if (SeqN–SeqFirst >= S_window) then
+#              doNothing();
+#             end if;
+#             Get_Data_From_Network_Layer();
+#             s = Make_Frame();
+#             s.seq = SeqN;
+#             Store_Copy_Frame(s);
+#             Send_Frame(s);
+#             Start_Timer(s);
+#             SeqN = SeqN + 1;
+#          end if;
+#          if (Event(Frame_Arrival) then
+#             r=Receive_Acknowledgement();
+#             // Resend frame whose sequence number is with ACK
+#             if (r.type= NAK) then
+#                if (NAK_No > SeqFirst & & NAK_No < SeqN ) then
+#              Retransmit(s.seq(NAK_No));
+#              Start_Timer(s);
+#              end if
+#              // Remove frames from sending window with positive ACK
+#              else if (r.type = ACK ) then
+#              Remove_Frame(s.seq(SeqFirst));
+#              Stop_Timer(s);
+#              SeqFirst = SeqFirst + 1;
+#              end if
+#              end if
+#              // Resend frame if acknowledgement haven’t been received
+#     if (Event(Time_Out)) then
+#         Start_Timer(s);
+#         Retransmit_Frame(s);
+#     end if
+#  end
+
+    def _build_packets_into_data(self):
+        pass
 
     def recv(self):
         pass
