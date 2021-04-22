@@ -7,6 +7,7 @@
 #include <ctime>
 #include <stdlib.h>
 #include <deque>
+#include <fstream>
 
 #include <sys/socket.h>
 #include <netinet/in.h>
@@ -40,8 +41,8 @@ const unsigned int RECEIVE_WINDOW_BITS = 16;
 const unsigned int COOL_DIRMA = 4;
 const unsigned int WINDOW_SIZE_BITS = 3;
 const unsigned int window_size = 8;
-const unsigned int SOCKET_READ_TIMEOUT_SEC = 10;
-const unsigned int MAXIMUM_PAYLOAD = 256;
+const unsigned int SOCKET_READ_TIMEOUT_SEC = 2;
+const unsigned int MAXIMUM_PAYLOAD = 255;
 
 typedef struct NetworkInformation {
     int sockFD;
@@ -82,16 +83,16 @@ class Packet {
             this->acknowledgementNum = acknowledgementNum;
             this->applnLayerData = nullptr;
         } else {
-            assert(applnLayerDataSize <= MAXIMUM_PAYLOAD);
+            assert((int)applnLayerDataSize <= MAXIMUM_PAYLOAD);
             this->messageType = messageType;
             this->applnLayerDataSize = applnLayerDataSize;
             this->receiveWindow = receiveWindow;
             this->sequenceNum = sequenceNum;
             this->acknowledgementNum = acknowledgementNum;
-            this->applnLayerData = (char*)malloc(applnLayerDataSize);
-            memset(this->applnLayerData, 0, applnLayerDataSize);
+            this->applnLayerData = (char*)malloc((int)applnLayerDataSize);
+            memset(this->applnLayerData, 0, (int)applnLayerDataSize);
             if (applnLayerData != nullptr) {
-                memcpy(this->applnLayerData, applnLayerData, applnLayerDataSize);
+                memcpy(this->applnLayerData, applnLayerData, (int)applnLayerDataSize);
             }
         }
     }
@@ -123,7 +124,7 @@ class Packet {
     }
 
     size_t sizeofPakcet() {
-        size_t headerSize = sizeof(uint8_t) + sizeof(uint8_t) + sizeof(uint16_t) + sizeof(uint32_t) + sizeof(uint32_t) + (sizeof(char) * this->applnLayerDataSize);
+        size_t headerSize = sizeof(uint8_t) + sizeof(uint8_t) + sizeof(uint16_t) + sizeof(uint32_t) + sizeof(uint32_t) + (sizeof(char) * (int)this->applnLayerDataSize);
         return headerSize;
     }
 
@@ -137,6 +138,7 @@ class Packet {
     }
 
     static Packet parsePacket(char* buffer, bool fullPacket) {
+        // this->logMessage(">>>>> Parse Packet:\n";
         char* bufferPointer = buffer;
 
         uint8_t messageType = (uint8_t)(*bufferPointer);
@@ -150,43 +152,45 @@ class Packet {
         receiveWindow = receiveWindow | *bufferPointer;
         ++bufferPointer;
 
-        uint32_t sequenceNum = (uint32_t)(*bufferPointer << 24);
+        uint32_t sequenceNum = 0;
+        sequenceNum = sequenceNum | ((uint32_t)((uint8_t)(*bufferPointer) << 24) & 0xFF000000);
         ++bufferPointer;
-        sequenceNum = sequenceNum | (*bufferPointer << 16);
+        sequenceNum = sequenceNum | ((uint32_t)((uint8_t)(*bufferPointer) << 16) & 0x00FF0000);
         ++bufferPointer;
-        sequenceNum = sequenceNum | (*bufferPointer << 8);
+        sequenceNum = sequenceNum | ((uint16_t)((uint8_t)(*bufferPointer) << 8) & 0xFF00);
         ++bufferPointer;
-        sequenceNum = sequenceNum | *bufferPointer;
+        sequenceNum = sequenceNum | (((uint8_t)(*bufferPointer)) & 0xFF);
         ++bufferPointer;
 
-        uint32_t acknowledgementNum = (uint32_t)(*bufferPointer << 24);
+        uint32_t acknowledgementNum = 0;
+        acknowledgementNum = acknowledgementNum | ((uint32_t)((uint8_t)(*bufferPointer) << 24) & 0xFF000000);
         ++bufferPointer;
-        acknowledgementNum = acknowledgementNum | (*bufferPointer << 16);
+        acknowledgementNum = acknowledgementNum | ((uint32_t)((uint8_t)(*bufferPointer) << 16) & 0x00FF0000);
         ++bufferPointer;
-        acknowledgementNum = acknowledgementNum | (*bufferPointer << 8);
+        acknowledgementNum = acknowledgementNum | ((uint16_t)((uint8_t)(*bufferPointer) << 8) & 0xFF00);
         ++bufferPointer;
-        acknowledgementNum = acknowledgementNum | *bufferPointer;
+        acknowledgementNum = acknowledgementNum | (((uint8_t)(*bufferPointer)) & 0xFF);
         ++bufferPointer;
 
         char* applnLayerData = nullptr;
-        if (applnLayerDataSize > 0) {
-            applnLayerData = (char*)malloc(sizeof(char) * applnLayerDataSize);
-            memset(applnLayerData, 0, sizeof(char) * applnLayerDataSize);
-            memcpy(applnLayerData, bufferPointer, sizeof(char) * applnLayerDataSize);
+        if ((int)applnLayerDataSize > 0) {
+            applnLayerData = (char*)malloc(sizeof(char) * (int)applnLayerDataSize);
+            memset(applnLayerData, 0, sizeof(char) * (int)applnLayerDataSize);
+            memcpy(applnLayerData, bufferPointer, sizeof(char) * (int)applnLayerDataSize);
             return Packet(messageType, applnLayerDataSize, receiveWindow, sequenceNum, acknowledgementNum, applnLayerData);
         }
 
-        // cout << "messageType: " << messageType << endl;
-        // cout << "applnLayerDataSize: " << applnLayerDataSize << endl;
-        // cout << "receiveWindow: " << receiveWindow << endl;
-        // cout << "sequenceNum: " << sequenceNum << endl;
-        // cout << "acknowledgementNum: " << acknowledgementNum << endl;
+        // this->logMessage("      messageType: " << (int)messageType << "\n"
+        //      << "      applnLayerDataSize: " << (int)applnLayerDataSize << "\n"
+        //      << "      receiveWindow: " << receiveWindow << "\n"
+        //      << "      sequenceNum: " << sequenceNum << "\n"
+        //      << "      acknowledgementNum: " << acknowledgementNum);
 
         return Packet(messageType, applnLayerDataSize, receiveWindow, sequenceNum, acknowledgementNum, applnLayerData);
     }
 
     char* serializePacket() {
-        size_t packetLength = (this->sizeofPakcet() + 1) * sizeof(char);
+        size_t packetLength = (this->sizeofPakcet()) * sizeof(char);
         char* buffer = (char*)malloc(packetLength);
         memset(buffer, '\0', packetLength);
 
@@ -220,11 +224,11 @@ class Packet {
         ++bufferPtrCopy;
 
         if (packetLength > Packet::sizeofPakcetHeaders()) {
-            memcpy(bufferPtrCopy, this->applnLayerData, this->applnLayerDataSize);
+            memcpy(bufferPtrCopy, this->applnLayerData, (int)(this->applnLayerDataSize));
         }
 
-        // cout << "serializePacket: \n"
-        //      << buffer << endl;
+        // this->logMessage("serializePacket: \n"
+        //      << buffer);
 
         return buffer;
     }
@@ -263,9 +267,11 @@ class MONKE {
     vector<pair<uint32_t, pair<size_t, char*>>> receiveBuffer;
     char* allData;
 
+    fstream logFile;
+
    public:
     MONKE() {
-        this->timeout = 5;
+        this->timeout = 1;
         // Sender details
         this->senderSequenceNumber = 0;
         this->senderAcknowledgementNumber = 0;
@@ -280,6 +286,12 @@ class MONKE {
         this->receiverReceiveWindow = (1 << WINDOW_SIZE_BITS);  // b'1000'
         this->receiveBuffer = vector<pair<uint32_t, pair<size_t, char*>>>();
         this->allData = nullptr;
+
+        this->logFile = fstream("output.log", fstream::out);
+    }
+
+    void logMessage(string s) {
+        this->logFile << s << endl;
     }
 
     bool connect(char* destination_ip, size_t n) {
@@ -287,7 +299,7 @@ class MONKE {
 
         if ((this->myNetworkInfo.sockFD = socket(AF_INET, SOCK_DGRAM, 0)) < 0) {
             // deallocate everything ans exit
-            cout << "[ERROR] connect() - socket() failed." << endl;
+            this->logMessage("[ERROR] connect() - socket() failed.");
             exit(1);
         }
 
@@ -298,17 +310,17 @@ class MONKE {
         this->myNetworkInfo.servAddr.sin_port = htons(42069);
         int ret = bind(this->myNetworkInfo.sockFD, (struct sockaddr*)&(this->myNetworkInfo.servAddr), sizeof(this->myNetworkInfo.servAddr));
         if (ret < 0) {
-            cout << "[ERROR] connect() - bind() failed." << endl;
+            this->logMessage("[ERROR] connect() - bind() failed.");
         }
 
-        cout << "[INFO] Created socket, bound to port number 42069." << endl;
+        this->logMessage("[INFO] Created socket, bound to port number 42069.");
 
         struct timeval timeout;
         timeout.tv_sec = SOCKET_READ_TIMEOUT_SEC;
         timeout.tv_usec = 0;
         setsockopt(this->myNetworkInfo.sockFD, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
 
-        cout << ">>>> " << sizeof(destination_ip) / sizeof(char) << endl;  // Change this also
+        // this->logMessage(">>>> " << strlen(destination_ip) / sizeof(char));  // Change this also
 
         this->peerNetworkInfo.ip = (char*)malloc(n);
         strcpy(this->peerNetworkInfo.ip, destination_ip);
@@ -321,16 +333,14 @@ class MONKE {
         int numTimeoutsOrAttempts = 0;
         while (numTimeoutsOrAttempts < 5) {
             /* Send SYN Packet */
-            // Packet synPacket(MESSAGE_TYPES::HELLO, 0, this->senderReceiveWindow, this->senderSequenceNumber, this->senderAcknowledgementNumber, nullptr);
-            // uint32_t seqNum = 0;
             Packet synPacket(MESSAGE_TYPES::HELLO, 0, this->senderReceiveWindow, this->senderSequenceNumber, this->senderAcknowledgementNumber, nullptr);
             socklen_t sockLen = sizeof(this->peerNetworkInfo.servAddr);
             int n = sendto(this->myNetworkInfo.sockFD, synPacket.serializePacket(), synPacket.sizeofPakcet(), 0, (sockaddr*)&(this->peerNetworkInfo.servAddr), sockLen);
             if (n < 0) {
-                cout << "[ERROR] Handshake failed" << endl;
+                this->logMessage("[ERROR] Handshake failed");
                 exit(1);
             }
-            cout << "[INFO] Sent SYN Packet" << endl;
+            this->logMessage("[INFO] Sent SYN Packet");
 
             /* Receive SYN-ACK Packet */
             char* buffer = (char*)malloc(Packet::maxPacketSize());  //  To check sender with peerNetworkInfo
@@ -341,99 +351,40 @@ class MONKE {
             if (n == -1) {
                 if ((errno == EAGAIN) || (errno == EWOULDBLOCK)) {
                     // Timeout
-                    cout << "[WARNING] SYN-ACK receiving timed out." << endl;
+                    this->logMessage("[WARNING] SYN-ACK receiving timed out.");
                     ++numTimeoutsOrAttempts;
                     continue;
                 } else {
                     // Some other error.
                     // deallocate `peerNetworkInfo` and exit
-                    cout << "[ERROR] While receiving SYN-ACK Packet, non timeout error." << endl;
-                    this->nonTimeoutErrorPrint();
+                    this->logMessage("[ERROR] While receiving SYN-ACK Packet, non timeout error.");
                     exit(1);
                 }
             }
             Packet synAckPacket = Packet::parsePacket(buffer, false);
             if (synAckPacket.getMessageType() == (MESSAGE_TYPES::HELLO | MESSAGE_TYPES::ACCEP)) {
                 /* Send final ACK */
-                cout << "[INFO] Received SYN-ACK Packet" << endl;
+                this->logMessage("[INFO] Received SYN-ACK Packet");
                 Packet ackPacket(MESSAGE_TYPES::ACCEP, 0, this->senderReceiveWindow, this->senderSequenceNumber, this->senderAcknowledgementNumber, nullptr);
                 socklen_t sockLen = sizeof(this->peerNetworkInfo.servAddr);
                 int n = sendto(this->myNetworkInfo.sockFD, ackPacket.serializePacket(), synPacket.sizeofPakcet(), 0, (sockaddr*)&(this->peerNetworkInfo.servAddr), sockLen);
                 if (n < 0) {
                     // deallocate all class members
-                    cout << "[ERROR] Handshake failed" << endl;
+                    this->logMessage("[ERROR] Handshake failed");
                     exit(1);
                 }
-                cout << "[INFO] Sent ACK Packet" << endl;
+                this->logMessage("[INFO] Sent ACK Packet");
                 break;
             }
-            // else if (synAckPacket.getMessageType() == MESSAGE_TYPES::DATA) {
-            //     // Removing unwanted data in from the network buffer
-            //     buffer = (char*)realloc(buffer, synAckPacket.getApplnLaterDataSize());
-            //     struct sockaddr_in servAddr;
-            //     servAddrSize = sizeof(servAddr);
-            //     memset(&(servAddr), 0, servAddrSize);
-            //     n = recvfrom(this->myNetworkInfo.sockFD, buffer, synAckPacket.getApplnLaterDataSize(), 0, (sockaddr*)&servAddr, &servAddrSize);
-            //     memset(buffer, 0, synAckPacket.getApplnLaterDataSize());
-            //     buffer = (char*)realloc(buffer, Packet::maxPacketSize());
-            //     ++numTimeoutsOrAttempts;
-            // }
+            free(buffer);
         }
 
         if (numTimeoutsOrAttempts >= 5) {
-            cout << "[INFO] Too many timeouts, can't handle this BS." << endl;
+            this->logMessage("[INFO] Too many timeouts, can't handle this BS.");
             return false;
         }
-
-        //     check 5 timeouts and cut
-        //     if (success) {
-        //     instantiate Sender Window;
-        //     instantiate Receiver Window;
-        //     instantiate Handlers;
-        // }
-        cout << "[INFO] Been done that 3 way Handshake." << endl;
+        this->logMessage("[INFO] Been done that 3 way Handshake.");
         return true;
-    }
-
-    void nonTimeoutErrorPrint() {
-        switch (errno) {
-            case EBADF: {
-                cout << "Non time out error : recvfrom : EBADF" << endl;
-                break;
-            }
-            case ECONNREFUSED: {
-                cout << "Non time out error : recvfrom : ECONNREFUSED" << endl;
-                break;
-            }
-            case EFAULT: {
-                cout << "Non time out error : recvfrom : EFAULT" << endl;
-                break;
-            }
-            case EINTR: {
-                cout << "Non time out error : recvfrom : EINTR" << endl;
-                break;
-            }
-            case EINVAL: {
-                cout << "Non time out error : recvfrom : EINVAL" << endl;
-                break;
-            }
-            case ENOMEM: {
-                cout << "Non time out error : recvfrom : ENOMEM" << endl;
-                break;
-            }
-            case ENOTCONN: {
-                cout << "Non time out error : recvfrom : ENOTCONN" << endl;
-                break;
-            }
-            case ENOTSOCK: {
-                cout << "Non time out error : recvfrom : ENOTSOCK" << endl;
-                break;
-            }
-            default: {
-                cout << "Dead" << endl;
-                break;
-            }
-        }
     }
 
     void listen() {
@@ -441,7 +392,7 @@ class MONKE {
 
         if ((this->myNetworkInfo.sockFD = socket(AF_INET, SOCK_DGRAM, 0)) < 0) {
             // deallocate everything ans exit
-            cout << "[ERROR] listen() - socket() failed." << endl;
+            this->logMessage("[ERROR] listen() - socket() failed.");
             exit(1);
         }
 
@@ -452,13 +403,13 @@ class MONKE {
         this->myNetworkInfo.servAddr.sin_port = htons(42070);
         int ret = bind(this->myNetworkInfo.sockFD, (struct sockaddr*)&(this->myNetworkInfo.servAddr), sizeof(this->myNetworkInfo.servAddr));
         if (ret < 0) {
-            cout << "[ERROR] listen() - bind() failed." << endl;
+            this->logMessage("[ERROR] listen() - bind() failed.");
         }
 
-        cout << "[INFO] Created socket, bound to port number 42070." << endl;
+        this->logMessage("[INFO] Created socket, bound to port number 42070.");
 
         struct timeval timeout;
-        timeout.tv_sec = SOCKET_READ_TIMEOUT_SEC;
+        timeout.tv_sec = 50 * SOCKET_READ_TIMEOUT_SEC;
         timeout.tv_usec = 0;
         setsockopt(this->myNetworkInfo.sockFD, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
 
@@ -474,31 +425,30 @@ class MONKE {
             if (n == -1) {
                 if ((errno == EAGAIN) || (errno == EWOULDBLOCK)) {
                     // Timeout
-                    cout << "[WARNING] SYN receiving timed out." << endl;
+                    this->logMessage("[WARNING] SYN receiving timed out.");
                     continue;
                 } else {
                     // Some other error.
                     // deallocate `peerNetworkInfo` and exit
-                    cout << "[ERROR] While receiving SYN Packet, non timeout error." << endl;
-                    this->nonTimeoutErrorPrint();
+                    this->logMessage("[ERROR] While receiving SYN Packet, non timeout error.");
                     exit(1);
                 }
             }
             Packet synPacket = Packet::parsePacket(buffer, false);
             if (synPacket.getMessageType() == MESSAGE_TYPES::HELLO) {
                 /* Send SYN-ACK */
-                cout << "[INFO] Received SYN Packet." << endl;
+                this->logMessage("[INFO] Received SYN Packet.");
                 Packet synAckPacket((MESSAGE_TYPES::HELLO | MESSAGE_TYPES::ACCEP), 0, this->receiverReceiveWindow, this->receiverSequenceNumber, synPacket.getSequenceNum(), nullptr);
                 socklen_t sockLen = sizeof(this->peerNetworkInfo.servAddr);
                 int n = sendto(this->myNetworkInfo.sockFD, synAckPacket.serializePacket(), synAckPacket.sizeofPakcet(), 0, (sockaddr*)&(this->peerNetworkInfo.servAddr), sockLen);
                 if (n < 0) {
                     // deallocate all class members
-                    cout << "[ERROR] Handshake failed" << endl;
+                    this->logMessage("[ERROR] Handshake failed");
                     exit(1);
                 }
-                cout << "[INFO] Sent SYN-ACK Packet." << endl;
+                this->logMessage("[INFO] Sent SYN-ACK Packet.");
                 /* Wait for ACK Packet */
-                memset(buffer, 0, synPacket.getApplnLaterDataSize());
+                memset(buffer, 0, (int)synPacket.getApplnLaterDataSize());
                 struct sockaddr_in servAddr;
                 socklen_t servAddrSize = sizeof(servAddr);
                 memset(&servAddr, 0, servAddrSize);
@@ -506,54 +456,25 @@ class MONKE {
                 if (n == -1) {
                     if ((errno == EAGAIN) || (errno == EWOULDBLOCK)) {
                         // Timeout
-                        cout << "[WARNING] ACK receiving timed out." << endl;
+                        this->logMessage("[WARNING] ACK receiving timed out.");
                         continue;
                     } else {
                         // Some other error.
                         // deallocate `peerNetworkInfo` and exit
-                        cout << "[ERROR] While receiving ACK Packet, non timeout error." << endl;
-                        this->nonTimeoutErrorPrint();
+                        this->logMessage("[ERROR] While receiving ACK Packet, non timeout error.");
                         exit(1);
                     }
                 }
                 Packet ackPacket = Packet::parsePacket(buffer, false);
                 if (ackPacket.getMessageType() == MESSAGE_TYPES::ACCEP) {
                     // Handshake Done
-                    cout << "[INFO] Received ACK Packet." << endl;
+                    this->logMessage("[INFO] Received ACK Packet.");
                     connected = true;
                 }
-                // else if (ackPacket.getMessageType() == MESSAGE_TYPES::DATA) {
-                //     // Removing unwanted data in from the network buffer
-                //     buffer = (char*)realloc(buffer, ackPacket.getApplnLaterDataSize());
-                //     servAddrSize = sizeof(servAddr);
-                //     memset(&servAddr, 0, servAddrSize);
-                //     n = recvfrom(this->myNetworkInfo.sockFD, buffer, ackPacket.getApplnLaterDataSize(), 0, (sockaddr*)&(servAddr), &servAddrSize);
-                //     memset(buffer, 0, ackPacket.getApplnLaterDataSize());
-                //     buffer = (char*)realloc(buffer, Packet::sizeofPakcetHeaders());
-                // }
             }
-            // else if (synPacket.getMessageType() == MESSAGE_TYPES::DATA) {
-            //     // Removing unwanted data in from the network buffer
-            //     buffer = (char*)realloc(buffer, synPacket.getApplnLaterDataSize());
-            //     struct sockaddr_in servAddr;
-            //     socklen_t servAddrSize = sizeof(servAddr);
-            //     memset(&servAddr, 0, servAddrSize);
-            //     n = recvfrom(this->myNetworkInfo.sockFD, buffer, synPacket.getApplnLaterDataSize(), 0, (sockaddr*)&(servAddr), &servAddrSize);
-            //     memset(buffer, 0, synPacket.getApplnLaterDataSize());
-            //     buffer = (char*)realloc(buffer, Packet::sizeofPakcetHeaders());
-            // }
             free(buffer);
         }
-
-        // wait for a packet (SYN Packet)
-        // start 3 way handshake
-
-        // if(success){
-        //     instantiate Sender Window;
-        //     instantiate Receiver Window;
-        //     instantiate Handlers;
-        // }
-        cout << "[INFO] Been done that 3 way Handshake." << endl;
+        this->logMessage("[INFO] Been done that 3 way Handshake.");
     }
 
     void updateWindowDetails() {
@@ -561,8 +482,11 @@ class MONKE {
         this->window_end = (this->window_base + window_size - 1) % ((uint64_t)(1) << 32);  // automatic modulo 2^32
     }
 
-    void send(char* data, size_t n) {
-        int dataSize = n;
+    void send(char* data, size_t numBytes) {
+        // this->logMessage("[SEND CALL]: \n"
+        //      << data)
+        //     );
+        int dataSize = numBytes;
         int index = 0;
         uint32_t seqNum = this->senderSequenceNumber;
         vector<Packet*> packetList;
@@ -584,6 +508,10 @@ class MONKE {
             }
             // Store packet
             if (dataChunk != nullptr) {
+                // this->logMessage("[INFO] DataChunk created is:\n"
+                //      << dataChunk << "\n"
+                //      << ">>>>>> Size of dataChunk " << dataChunkSize << " bytes.")
+                //     );
                 packet = new Packet(MESSAGE_TYPES::DATA, dataChunkSize, this->senderReceiveWindow, seqNum, this->senderAcknowledgementNumber, dataChunk);
                 packetList.push_back(packet);
                 ++seqNum;
@@ -594,10 +522,13 @@ class MONKE {
         packetList.push_back(packet);
         ++seqNum;
 
+        this->logMessage("[INFO] Packet List has " + to_string(packetList.size()) + " packets.");
         /* 1. Send as many packets as possible. */
         bool doneSending = false;
         bool finSent = false;
         unsigned int packetListIndex = 0;
+        int numAttempts = 0;
+        bool peerCut = false;
         while (!doneSending) {
             if (finSent && this->sendWindow.empty()) {
                 // Send exit condition = FIN has been sent and Send Window is empty
@@ -617,81 +548,23 @@ class MONKE {
                         (sockaddr*)&(this->peerNetworkInfo.servAddr),
                         peerNetworkInfoSize);
                     if (packet->getMessageType() == MESSAGE_TYPES::DATA) {
-                        cout << "[INFO] Sent a DATA packet with seq num: " << packet->getSequenceNum() << endl;
+                        this->logMessage("[INFO] Sent a DATA packet with seq num: " + to_string(packet->getSequenceNum()) + " of size " + to_string(packet->sizeofPakcet()) + " bytes whose applnLayerData has size " + to_string((int)(packet->getApplnLaterDataSize())) + " bytes.");
                     } else if (packet->getMessageType() == MESSAGE_TYPES::FIN) {
                         finSent = true;
-                        cout << "[INFO] Sent a FIN packet with seq num: " << packet->getSequenceNum() << endl;
+                        this->logMessage("[INFO] Sent a FIN packet with seq num: " + to_string(packet->getSequenceNum()));
                     }
                     if (n < 0) {
-                        cout << "[ERROR] Sending failed." << endl;
+                        this->logMessage("[ERROR] Sending failed.");
                         exit(1);
                     }
                     ++packetListIndex;
-                    ++senderSequenceNumber;
+                    ++(this->senderSequenceNumber);
+                    this->logMessage("[INFO] Updated seq num to: " + to_string(this->senderSequenceNumber));
+                    this->logMessage("[INFO] Updated packetIndex to: " + to_string(packetListIndex));
                 } else {
                     break;
                 }
             }
-
-            /*
-				1B => 1 DATA + 1 FIN
-
-				senderSequenceNumber = 0
-				packetListIndex = 0
-					send DATA
-					incr seqNUM
-				senderSequenceNumber = 1
-				packetListIndex = 1
-					send FIN
-					incr seqNUM
-				senderSequenceNumber = 2
-				packetListIndex = 2
-				
-
-			*/
-
-            // // While there is data available to send
-            // while (index < dataSize) {
-            //     char* dataChunk = nullptr;
-            //     size_t dataChunkSize = 0;
-            //     Packet* packet = nullptr;
-            //     // While window has space
-            //     while ((this->senderSequenceNumber - 1) != this->window_end) {
-            //         // Chunk Data Accordingly
-            //         if (index + MAXIMUM_PAYLOAD < dataSize) {
-            //             dataChunk = (char*)malloc(sizeof(char) * MAXIMUM_PAYLOAD);
-            //             memcpy(dataChunk, data + index, MAXIMUM_PAYLOAD);
-            //             dataChunkSize = MAXIMUM_PAYLOAD;
-            //             index += MAXIMUM_PAYLOAD;
-            //         } else {
-            //             dataChunk = (char*)malloc(sizeof(char) * (dataSize - index));
-            //             memcpy(dataChunk, data + index, (dataSize - index));
-            //             dataChunkSize = (dataSize - index);
-            //             index += (dataSize - index);
-            //         }
-            //         // Store packet
-            //         if (dataChunk != nullptr) {
-            //             packet = new Packet(MESSAGE_TYPES::DATA, dataChunkSize, this->senderReceiveWindow, this->senderSequenceNumber, this->senderAcknowledgementNumber, dataChunk);
-            //             this->sendWindow.push_back(make_tuple(time(0), false, packet));
-            //         } else {
-            //             // maybe FIN packet condition
-            //             packet = new Packet(MESSAGE_TYPES::FIN, 0, this->senderReceiveWindow, this->senderSequenceNumber, this->senderAcknowledgementNumber, nullptr);
-            //             this->sendWindow.push_back(make_tuple(time(0), false, packet));
-            //             finSent = true;
-            //         }
-            //         /* Send packet */
-            //         socklen_t peerNetworkInfoSize = sizeof(this->peerNetworkInfo.servAddr);
-            //         int n = sendto(this->myNetworkInfo.sockFD, packet, packet->sizeofPakcet(), 0, (sockaddr*)&(this->peerNetworkInfo.servAddr), peerNetworkInfoSize);
-            //         if (n < 0) {
-            //             cout << "[ERROR] send() - Sending DATA failed." << endl;
-            //             exit(1);
-            //         }
-            //         ++senderSequenceNumber;
-            //     }
-            //     if ((this->senderSequenceNumber - 1) == this->window_end) {
-            //         break;
-            //     }
-            // }
 
             /* 2. Receive as many ACKs as possible. */
             char* buffer = (char*)malloc(Packet::maxPacketSize());
@@ -703,42 +576,65 @@ class MONKE {
                 Packet received_packet = Packet::parsePacket(buffer, false);
                 if (received_packet.getMessageType() == MESSAGE_TYPES::ACCEP) {
                     uint32_t ackPacketACKNum = received_packet.getAcknowledgementNum();  // ackPacketACKNum will be sent packet SEQ_NUM
-                    cout << "[INFO] Received ACK packet for seq num: " << ackPacketACKNum << endl;
-                    if (this->window_base == ackPacketACKNum) {  //  base ------- end+1seq
+                    if (this->window_base == (ackPacketACKNum % (1 << 16))) {            //  base ------- end+1seq
                         this->sendWindow.pop_front();
                         this->updateWindowDetails();
+                        this->logMessage("[INFO] Received ACK packet for seq num: " + to_string(ackPacketACKNum) + ", removed it.");
                         while (get<1>(this->sendWindow.front())) {
+                            this->logMessage("[INFO] Removing from window packet with seq num: " + to_string(get<2>(this->sendWindow.front())->getSequenceNum()));
                             this->sendWindow.pop_front();
                             this->updateWindowDetails();
                         }
                     } else {
-                        get<1>(this->sendWindow[ackPacketACKNum - this->window_base]) = true;
+                        for (auto& packetDetails : this->sendWindow) {
+                            if (get<2>(packetDetails)->getSequenceNum() == ackPacketACKNum) {
+                                get<1>(packetDetails) = true;
+                                this->logMessage("[INFO] Received ACK packet for seq num: " + to_string(ackPacketACKNum) + ", setting it and not removing it.");
+                            }
+                        }
+                        // get<1>(this->sendWindow[(ackPacketACKNum % (1 << 16)) - this->window_base]) = true;
                     }
                 }
                 if (this->sendWindow.empty()) {
                     break;
                 }
-                // else if (received_packet.getMessageType() == MESSAGE_TYPES::DATA) {
-                //     buffer = (char*)realloc(buffer, received_packet.getApplnLaterDataSize());
-                //     n = recvfrom(this->myNetworkInfo.sockFD, buffer, received_packet.getApplnLaterDataSize(), 0, (sockaddr*)&(this->peerNetworkInfo.servAddr), (socklen_t*)sizeof(this->peerNetworkInfo.servAddr));
-                //     memset(buffer, 0, received_packet.getApplnLaterDataSize());
-                //     buffer = (char*)realloc(buffer, Packet::sizeofPakcetHeaders());
+                // else {
+                //     this->logMessage("[INFO] Front packet number: " + to_string(get<2>(this->sendWindow.front())->getSequenceNum()));
+                //     while (get<1>(this->sendWindow.front())) {
+                //         this->logMessage("[INFO] Removing from window packet with seq num: " + to_string(get<2>(this->sendWindow.front())->getSequenceNum()));
+                //         this->sendWindow.pop_front();
+                //         this->updateWindowDetails();
+                //     }
                 // }
                 memset(&(servAddr), 0, servAddrSize);
                 n = recvfrom(this->myNetworkInfo.sockFD, buffer, Packet::maxPacketSize(), 0, (sockaddr*)&(servAddr), &servAddrSize);
             }
-            cout << "Size of sendWindow: " << this->sendWindow.size() << endl;
-            cout << "[INFO] Window ends: " << this->window_base << " ----- " << this->window_end << endl;
-            if (n < 0) {
-                // deallocate everything and then cut
-                cout << "[ERROR] send() - Receiving ACKs failed." << endl;
-                exit(1);
+            free(buffer);
+            this->logMessage("Size of sendWindow: " + to_string(this->sendWindow.size()));
+            this->logMessage("[INFO] Window ends: " + to_string(this->window_base) + " ----- " + to_string(this->window_end));
+            if (n == -1) {
+                if ((errno == EAGAIN) || (errno == EWOULDBLOCK)) {
+                    // Timeout
+                    this->logMessage("[WARNING] ACK receiving timed out.");
+                    // continue;
+                    ++numAttempts;
+                    if (numAttempts > SOCKET_READ_TIMEOUT_SEC) {
+                        peerCut = true;
+                        break;
+                    }
+                } else {
+                    // Some other error.
+                    // deallocate `peerNetworkInfo` and exit
+                    this->logMessage("[ERROR] While receiving ACK Packet, non timeout error.");
+                    exit(1);
+                }
             }
 
             //third: receive chance over, resend unack'd
             /* 3. Resend un-ACK'd packets that have timeout. */
             for (auto& packetDetails : this->sendWindow) {
                 time_t timeElapsed = time(0) - get<0>(packetDetails);
+                this->logMessage("[CHECKING] Inside resend loop with packet of seq num " + to_string(get<2>(packetDetails)->getSequenceNum()) + " with time elapsed " + to_string(timeElapsed));
                 if (timeElapsed > this->timeout) {
                     Packet* packet = get<2>(packetDetails);
                     // code for re-sending packet
@@ -751,14 +647,18 @@ class MONKE {
                         0,
                         (sockaddr*)&(this->peerNetworkInfo.servAddr),
                         peerNetworkInfoSize);
-
-                    cout << "[INFO] Resent packet with seq num: " << packet->getSequenceNum() << endl;
+                    get<0>(packetDetails) = time(0);
+                    this->logMessage("[INFO] Resent and Reset timer for packet with seq num: " + to_string(packet->getSequenceNum()));
                     if (n < 0) {
-                        cout << "[ERROR] Sending failed." << endl;
+                        this->logMessage("[ERROR] Sending failed.");
                         exit(1);
                     }
                 }
             }
+            this->logMessage("[INFO] Done resending packets and resetting timeouts.");
+        }
+        if (peerCut) {
+            this->logMessage("[INFO] The peer connection is lost.");
         }
     }
 
@@ -766,6 +666,7 @@ class MONKE {
         int dataSizeReceived = -1;
         bool doneReceiving = false;
         bool timeOutCondition = false;
+        int recvAttempts = 0;
         while (!doneReceiving) {
             char* buffer = (char*)malloc(Packet::maxPacketSize());
             struct sockaddr_in servAddr;
@@ -775,54 +676,27 @@ class MONKE {
             if (n == -1) {
                 if ((errno == EAGAIN) || (errno == EWOULDBLOCK)) {
                     // Timeout
-                    cout << "[WARNING] recvfrom() - timed out." << endl;
-                    dataSizeReceived = 0;
+                    this->logMessage("[WARNING] recvfrom() - timed out.");
+                    // ++recvAttempts;
+                    // this->logMessage("[WARNING] recvfrom() - timed out. Restarting recv.");
+                    dataSizeReceived = -1;
                     timeOutCondition = true;
                     doneReceiving = true;
                 } else {
                     // Some other error.
                     // deallocate `peerNetworkInfo` and exit
-                    cout << "[ERROR] While receiving SYN Packet, non timeout error." << endl;
-                    this->nonTimeoutErrorPrint();
+                    this->logMessage("[ERROR] While receiving SYN Packet, non timeout error.");
                     exit(1);
                 }
             }
             Packet received_packet = Packet::parsePacket(buffer, false);
             MESSAGE_TYPES messageType = received_packet.getMessageType();
             if (messageType == MESSAGE_TYPES::DATA) {
-                cout << "[INFO] Received a DATA packet with seq num: " << received_packet.getSequenceNum() << endl;
-                // cout << ">>>>>> Received DATA packet's appln layer data is: " << received_packet.getApplnLaterDataPtr() << endl;
-                // size_t applnLayerDataSize = received_packet.getApplnLaterDataSize() * sizeof(char);
-                // char* dataBuffer = (char*)malloc(applnLayerDataSize);
-                // memset(dataBuffer, 0, applnLayerDataSize);
-                // // read applnLayerDataSize amount of data again from buffer
-                // memset(&(servAddr), 0, servAddrSize);
-                // n = recvfrom(this->myNetworkInfo.sockFD, dataBuffer, applnLayerDataSize, 0, (sockaddr*)&(servAddr), &servAddrSize);
-                // if (n == -1) {
-                //     if ((errno == EAGAIN) || (errno == EWOULDBLOCK)) {
-                //         // Timeout
-                //         cout << "[WARNING] SYN receiving timed out." << endl;
-                //         doneReceiving = true;
-                //     } else {
-                //         // Some other error.
-                //         // deallocate `peerNetworkInfo` and exit
-                //         cout << "[ERROR] While receiving SYN Packet, non timeout error." << endl;
-                //         this->nonTimeoutErrorPrint();
-                //         exit(1);
-                //     }
-                // }
-                // cout << "DATA size: " << applnLayerDataSize << endl;
-                // char* dataBufferCopy = dataBuffer;
-                // for (int i = 0; i < applnLayerDataSize; ++i) {
-                //     cout << dataBufferCopy[i] << "-";
-                // }
-                // cout << dataBuffer << endl;
-                // memcpy(received_packet.getApplnLaterDataPtr(), dataBuffer, received_packet.getApplnLaterDataSize());
-                // cout << "[INFO] Read data of the DATA packet and memcpy'd into packet." << endl;
+                this->logMessage("[INFO] Received a DATA packet with seq num: " + to_string(received_packet.getSequenceNum()) + " of size: " + to_string(n) + " bytes.");
                 this->receiveBuffer.push_back(make_pair(received_packet.getSequenceNum(), make_pair(received_packet.getApplnLaterDataSize(), received_packet.getApplnLaterDataPtr())));
                 --this->receiverReceiveWindow;
+
                 Packet packet = Packet(MESSAGE_TYPES::ACCEP, 0, this->receiverReceiveWindow, this->receiverSequenceNumber, received_packet.getSequenceNum(), nullptr);
-                // C++.send(); an a ACCEP msg
                 socklen_t peerNetworkInfoSize = (socklen_t)sizeof(this->peerNetworkInfo.servAddr);
                 char* packetBuffer = packet.serializePacket();
                 n = sendto(
@@ -832,14 +706,14 @@ class MONKE {
                     0,
                     (sockaddr*)&(this->peerNetworkInfo.servAddr),
                     peerNetworkInfoSize);
-
                 if (n < 0) {
-                    cout << "[ERROR] Sending failed." << endl;
+                    this->logMessage("[ERROR] Sending failed.");
                     exit(1);
                 }
-                cout << "[INFO] Sent ACCEP Packet in response to the DATA packet." << endl;
+                this->logMessage("[INFO] Sent ACCEP Packet in response to the DATA packet.");
             } else if (messageType == MESSAGE_TYPES::FIN) {
-                //a certain amount of data has been successfully received
+                this->logMessage("[INFO] Received a FIN packet with seq num: " + to_string(received_packet.getSequenceNum()) + " of size: " + to_string(n) + " bytes.");
+
                 Packet packet = Packet(MESSAGE_TYPES::ACCEP, 0, this->receiverReceiveWindow, this->receiverSequenceNumber, received_packet.getSequenceNum(), nullptr);
                 socklen_t peerNetworkInfoSize = (socklen_t)sizeof(this->peerNetworkInfo.servAddr);
                 char* packetBuffer = packet.serializePacket();
@@ -850,12 +724,11 @@ class MONKE {
                     0,
                     (sockaddr*)&(this->peerNetworkInfo.servAddr),
                     peerNetworkInfoSize);
-
                 if (n < 0) {
-                    cout << "[ERROR] Sending failed." << endl;
+                    this->logMessage("[ERROR] Sending failed.");
                     exit(1);
                 }
-
+                this->logMessage("[INFO] Sent ACCEP Packet in response to the FIN packet.");
                 // Packet the data to send to user
                 sort(this->receiveBuffer.begin(), this->receiveBuffer.end(), [](const pair<uint32_t, pair<size_t, char*>>& p1, const pair<uint32_t, pair<size_t, char*>>& p2) {
                     return p1.first < p2.first;
@@ -864,7 +737,7 @@ class MONKE {
                 for (auto& Buffer : this->receiveBuffer) {
                     dataSizeReceived += Buffer.second.first;
                 }
-                dataSizeReceived += 1;  // For the most irritating char* shit a.k.a null char at the end of the string
+                // dataSizeReceived += 1;  // For the most irritating char* shit a.k.a null char at the end of the string
                 this->allData = (char*)malloc(dataSizeReceived * sizeof(char));
                 memset(this->allData, 0, dataSizeReceived * sizeof(char));
                 char* allDataCopy = this->allData;
@@ -872,8 +745,6 @@ class MONKE {
                     memcpy(allDataCopy, Buffer.second.second, Buffer.second.first * sizeof(char));
                     allDataCopy += Buffer.second.first;
                 }
-                // memcpy(allData, allData, dataSizeReceived * sizeof(char));
-
                 //setup to reinitialize few globals
                 this->receiverReceiveWindow = (1 << WINDOW_SIZE_BITS);  // b'1000'
                 this->receiveBuffer = vector<pair<uint32_t, pair<size_t, char*>>>();
@@ -886,6 +757,7 @@ class MONKE {
                 // Cut from while loop
                 doneReceiving = true;
             }
+            free(buffer);
         }
 
         if (!timeOutCondition) {
@@ -895,11 +767,11 @@ class MONKE {
             } else {
                 *userBuffer = (char*)malloc(dataSizeReceived * sizeof(char));
             }
-            // cout << hex << userBuffer << endl;
             memcpy(*userBuffer, this->allData, dataSizeReceived * sizeof(char));
             free(this->allData);
             this->allData = nullptr;
         }
+        this->logMessage("[INFO] Data received is : " + to_string(dataSizeReceived));
         return dataSizeReceived;
     }
 };
